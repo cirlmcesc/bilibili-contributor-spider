@@ -8,15 +8,16 @@
 from BilibiliContributorSpider.items import VideoItem
 from BilibiliContributorSpider.database.Pedoo import ORMModel
 
+
 class Video(ORMModel):
     table_name = 'video_infomation'
 
 class BilibilicontributorspiderPipeline(object):
     def process_item(self, item, spider):
-        if isinstance(item, VideoItem):
-            if not Video.has('aid', '=', item.get('aid')):
-                video = Video(attributes=dict(item))
-                video.save()
+        if isinstance(item, VideoItem) and not Video.has('aid', '=', item.get('aid')):
+            video = Video(attributes=dict(item))
+            video.save()
 
         return item
+
 

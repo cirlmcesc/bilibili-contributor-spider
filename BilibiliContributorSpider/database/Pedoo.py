@@ -18,18 +18,18 @@ MYSQL_CONFIG = {
 }
 
 def CheckConnect(func):
-    def execute(*args):
+    def execute(*args, **kw):
         if isinstance(MySQLConnect.db_connect, dict) or MySQLConnect.execute_count > 100:
             MySQLConnect.connect(MYSQL_CONFIG)
             MySQLConnect.execute_count = 0
-        return func(*args)
+        return func(*args, **kw)
     return execute
+
 
 class MySQLConnect(object):
     """ MySQL connect"""
     execute_count = 0
     sql_statement_log = []
-    last_execute_sql = ""
     db_connect = {}
     db = {}
 
@@ -59,21 +59,23 @@ class MySQLConnect(object):
 
     @classmethod
     @CheckConnect
-    def execute(cls, sql=""):
+    def execute(cls, sql, parameter=(), many=False):
         """ execute sql """
+        cls.sql_statement_log.append({time.time(): sql})
+        cls.execute_count += 1
 
         try:
-            cls.db.execute(sql)
-            cls.sql_statement_log.append({time.time(): sql})
-            cls.last_execute_sql = sql
-            cls.execute_count = cls.execute_count + 1
+            if many:
+                cls.db.executemany(sql, parameter)
+            else:
+                cls.db.execute(sql, parameter)
 
             if sql.upper().replace(" ", "").startswith("SELECT"):
                 return cls.db.fetchall()
+        except:
+            print cls.db._last_executed
 
-            return cls.db_connect.commit()
-        except :
-            print sql
+        return cls.db_connect.commit()
 
     @classmethod
     def log(cls):
@@ -84,19 +86,16 @@ class MySQLConnect(object):
 class QueryBuilder(object):
     """ Query Builder """
 
-    _ormmodel = ""
-    _table_name = ""
-    _fields = "*"
-    _join = []
-    _where = []
-    _order = []
-    _group = []
-    _limit = ""
-    _final_sql = ""
-
     def __init__(self, ormmodel):
         self._ormmodel = ormmodel
         self._table_name = ormmodel.table_name
+        self._fields = "*"
+        self._join = []
+        self._where = []
+        self._order = []
+        self._group = []
+        self._limit = ""
+        self._final_sql = ""
 
     def select(self, *fields):
         """ set select fields """
@@ -116,6 +115,7 @@ class QueryBuilder(object):
             field = self._fields
 
         sql = "SElECT %s FROM %s" % (field.replace("'", ''), self._table_name)
+
         return sql + "".join(
             map(lambda condition: self._buildConditionString(condition), [
                 "_join", "_where", "_order", "_limit", "_group"
@@ -130,7 +130,7 @@ class QueryBuilder(object):
             elif condition == "_group":
                 return " GROUP BY "
 
-            return " %s " % condition.replace("_", " ").upper()
+            return "%s " % condition.replace("_", " ").upper()
 
         content = getattr(self, condition)
         joinstring = ", " if condition == "_order" or condition == "_group" else " "
@@ -176,9 +176,9 @@ class QueryBuilder(object):
             restring = value.replace(" ", "") if isinstance(value, str) else str(value)
 
             if (not isinstance(value, int) or
-                    not restring.startswith("(") or
-                    not restring.startswith("'") or
-                    not restring.startswith("NULL")):
+                not restring.startswith("(") or
+                not restring.startswith("'") or
+                not restring.startswith("NULL")):
                 value = "'%s'" % value
 
             self._where.append(" ".join((field, _cmp, value)))
@@ -201,6 +201,7 @@ class QueryBuilder(object):
     def whereBetween(self, field, from_condition, to_condition, **kw):
         """ where between """
         between = "BETWEEN" if not len(kw) else kw["_cmp"]
+
         return self.where(field, between, "'%s' AND '%s'" % (from_condition, to_condition))
 
     def whereNotBetween(self, field, from_condition, to_condition):
@@ -210,6 +211,7 @@ class QueryBuilder(object):
     def whereNull(self, field, **kw):
         """ where field null """
         _cmp = "IS" if not len(kw) else kw["_cmp"]
+
         return self.where(field, _cmp, "NUll")
 
     def whereNotNull(self, field):
@@ -221,12 +223,14 @@ class QueryBuilder(object):
         offset = 0 if not len(args) else offset
         number = offset if not len(args) else args[0]
         self._limit = "%d, %d" % (offset, number)
+
         return self
 
     def orderBy(self, field, *args):
         """ order by """
         _cmp = "ASC" if not len(args) else "DESC"
         self._order.append(" ".join((field, _cmp)))
+
         return self
 
     def groupBy(self, field):
@@ -240,15 +244,18 @@ class QueryBuilder(object):
 
     def update(self, attributes):
         """ execute update """
-        source_data = ["%s = %s" % (attr, attributes.get(attr, None)) for attr in attributes]
-        sql = ("UPDATE %s SET " % self._table_name) + ", ".join(source_data)
+        source_fields = ["%s = %s" % (attr, "%s") for attr in attributes]
+        srouce_value = [attributes.get(attr, '') for attr in attributes]
+        sql = ("UPDATE %s SET " % self._table_name) + ", ".join(source_fields)
         sql = sql + self._buildConditionString("_where")
-        return MySQLConnect.execute(sql)
+
+        return MySQLConnect.execute(sql, parameter=srouce_value)
 
     def delete(self):
         """ execute delete """
         sql = "DELETE FROM %s" % self._table_name
         sql = sql + self._buildConditionString("_where")
+
         return MySQLConnect.execute(sql)
 
     def get(self):
@@ -268,9 +275,9 @@ class ResaultBuilder(object):
     """ Resault Builder """
 
     @classmethod
-    def execute(cls, sql):
+    def execute(cls, sql, parameter=(), many=False):
         """ execute """
-        return MySQLConnect.execute(sql)
+        return MySQLConnect.execute(sql, parameter=parameter, many=False)
 
     @classmethod
     def query(cls, builder, few=True):
@@ -294,31 +301,37 @@ class ResaultBuilder(object):
 
 class ORMModel(object):
     """ Model """
-    table_name = ""
-    fields = []
-    no_attribute = ("table_name", "origin_attributes", "id")
-    origin_attributes = {}
-    __id = 0
+    no_attribute = (
+        "fields", "table_name", "_ORMModel__id", "origin_attributes", "origin_id")
 
     def __init__(self, table_name="", attributes={}, origin_attributes={}):
+        if not isinstance(attributes, dict) or not isinstance(origin_attributes, dict):
+            raise AttributeError("data type error.")
+
+        self.fields = []
+
         if self.table_name == "" and table_name == "":
             self.table_name = self.__class__.__name__.lower()
         elif table_name != "":
             self.table_name = table_name
 
-        if len(attributes):
-            for attribute in attributes:
-                self.__setattr__(attribute, attributes.get(attribute))
+        def setModelInstanceAttribute(attributedata):
+            for val in attributedata:
+                self.__setattr__(val, attributedata.get(val, None))
 
-        if len(origin_attributes):
+        if isinstance(attributes, dict) and len(attributes):
+            setModelInstanceAttribute(attributes)
+
+        if isinstance(origin_attributes, dict) and len(origin_attributes):
             self.origin_attributes = origin_attributes
-            self.__id = origin_attributes.get("id", "")
-
-            for attribute in origin_attributes:
-                self.__setattr__(attribute, origin_attributes.get(attribute))
+            self.origin_id = origin_attributes.get("id", "")
+            setModelInstanceAttribute(origin_attributes)
+        else:
+            self.origin_attributes = origin_attributes
+            self.origin_id = 0
 
     def __setattr__(self, attr, value):
-        if not attr in self.no_attribute:
+        if not attr in self.no_attribute and not attr in self.fields:
             fields = self.fields
             fields.append(attr)
             self.__dict__["fields"] = fields
@@ -350,6 +363,41 @@ class ORMModel(object):
     def first(cls):
         """ get first data """
         return ResaultBuilder.query(QueryBuilder(cls).limit(1), few=False)
+
+    @classmethod
+    def update(cls, data):
+        """ update data """
+        return QueryBuilder(cls).update(data)
+
+    @classmethod
+    def insert(cls, data):
+        """ attribute insert to table"""
+        if (not isinstance(data, list) and
+            not isinstance(data, dict)) or not len(data):
+            raise AttributeError("data type error.")
+
+        def BuildInsertValueParam():
+            """ build param """
+            def builddata(value):
+                return tuple([value.get(field, '') for field in value])
+
+            return builddata(data) if isinstance(data, dict) else [
+                builddata(instance) for instance in data
+            ]
+
+        fields = data.keys() if isinstance(data, dict) else random.choice(data).keys()
+        sql = "INSERT INTO %s %s VALUES %s" % (
+            cls.table_name,
+            tuple(fields).__str__().replace("'", ''),
+            "(%s)" % ", ".join(["%s" for index in range(len(fields))]))
+
+        return MySQLConnect.execute(
+            sql, parameter=BuildInsertValueParam(), many=isinstance(data, list))
+
+    @classmethod
+    def find(cls, data_id):
+        """ get the id data """
+        return QueryBuilder(cls).where('id', data_id).first()
 
     @classmethod
     def select(cls, *fields):
@@ -386,7 +434,8 @@ class ORMModel(object):
         attributes = dict().fromkeys(self.fields)
 
         for attr in attributes:
-            attributes[attr] = getattr(self, attr)
+            if attr != '_ORMModel__id':
+                attributes[attr] = getattr(self, attr)
 
         return attributes
 
@@ -395,16 +444,18 @@ class ORMModel(object):
         attributes = self.arrangeAttributes()
 
         if len(self.origin_attributes):
-            return QueryBuilder(self).where("id", self.__id).update(attributes)
+            QueryBuilder(self).where("id", self.origin_id).update(attributes)
+
+            return self.find(self.origin_id)
 
         return self.insert(attributes)
 
     def delete(self):
         """ delete this model data """
-        if self.__id == 0:
+        if self.origin_id == 0:
             raise AttributeError("Instance have not attribute 'ID'")
 
-        return QueryBuilder(self).where("id", self.__id).delete()
+        return QueryBuilder(self).where("id", self.origin_id).delete()
 
     def dict(self):
         """ self to dict """
@@ -414,20 +465,3 @@ class ORMModel(object):
             d[field] = getattr(self, field)
 
         return d
-
-    @classmethod
-    def insert(cls, data):
-        """ attribute insert to table"""
-        if (not isinstance(data, list) and
-            not isinstance(data, dict)) or not len(data):
-            raise AttributeError("data type error.")
-
-        def buildInsertIntoValueSQLString(fields, attribute):
-            values = ["'%s'" % attribute.get(field, "") for field in fields]
-            return "(%s)" % ", ".join(values)
-
-        fields = data.keys() if isinstance(data, dict) else random.choice(data).keys()
-        values = buildInsertIntoValueSQLString(fields, data) if isinstance(data, dict) else ", ".join(
-            map(lambda attr: buildInsertIntoValueSQLString(fields, attr), data))
-        sql = "INSERT INTO %s %s VALUES %s" % (cls.table_name, tuple(fields).__str__().replace("'", ''), values)
-        return MySQLConnect.execute(sql)
