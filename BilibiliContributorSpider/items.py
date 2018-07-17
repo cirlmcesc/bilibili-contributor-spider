@@ -27,3 +27,4 @@ class VideoItem(scrapy.Item):
     aid = scrapy.Field()
     hide_click = scrapy.Field()
     typename = scrapy.Field()
+    share = scrapy.Field()

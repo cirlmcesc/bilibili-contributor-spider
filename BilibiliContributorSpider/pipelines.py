@@ -5,12 +5,13 @@
 # Don't forget to add your pipeline to the ITEM_PIPELINES setting
 # See: https://doc.scrapy.org/en/latest/topics/item-pipeline.html
 
+import time
 from BilibiliContributorSpider.items import VideoItem
 from BilibiliContributorSpider.database.Pedoo import ORMModel
 
 
 class Video(ORMModel):
-    table_name = 'video_infomation'
+    table_name = 'video_infomation_june'
 
 class BilibilicontributorspiderPipeline(object):
     def process_item(self, item, spider):

@@ -9,10 +9,11 @@ try:
 except ImportError:
     import pymysql as MySQLdb
 
+
 MYSQL_CONFIG = {
-    "host": "127.0.0.1",
+    "host": "localhost",
     "user": "root",
-    "passwd": "",
+    "passwd": "qwe123",
     "db": "bilibili",
     "charset": "utf8"
 }
@@ -28,6 +29,7 @@ def CheckConnect(func):
 
 class MySQLConnect(object):
     """ MySQL connect"""
+
     execute_count = 0
     sql_statement_log = []
     db_connect = {}
@@ -55,7 +57,7 @@ class MySQLConnect(object):
             }
         """
         cls.db_connect = MySQLdb.connect(**db_config)
-        cls.db = cls.db_connect.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+        cls.db = cls.db_connect.cursor()
 
     @classmethod
     @CheckConnect
@@ -301,11 +303,14 @@ class ResaultBuilder(object):
 
 class ORMModel(object):
     """ Model """
+
     no_attribute = (
         "fields", "table_name", "_ORMModel__id", "origin_attributes", "origin_id")
 
     def __init__(self, table_name="", attributes={}, origin_attributes={}):
-        if not isinstance(attributes, dict) or not isinstance(origin_attributes, dict):
+        if not isinstance(attributes, dict) and not isinstance(origin_attributes, list):
+            print "origin_attr %s, attr %s" % (type(origin_attributes), type(attributes))
+            print table_name, attributes, origin_attributes
             raise AttributeError("data type error.")
 
         self.fields = []
